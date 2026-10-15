@@ -25,6 +25,40 @@ import {
 // Everything that takes the engine's `$` lives in this file: the engine follows `$` into functions
 // of this file only, never across an import. The other files draw from plain values and callbacks.
 
+// ── Model buttons: the list comes from settings.json, so the buttons send what /model accepts here ──
+const MODEL_TIERS = ['haiku', 'sonnet', 'opus', 'fable']
+// Used when settings.json has no modelPicker: aliases that /model resolves through the env defaults.
+const FALLBACK_MODELS = [{ value: 'haiku', label: 'Haiku' }, { value: 'sonnet', label: 'Sonnet' }, { value: 'opus', label: 'Opus' }]
+let modelOptions = FALLBACK_MODELS
+let modelsReadAt = 0
+
+// Weakest to strongest, the order the buttons use. A label with no known tier sorts last.
+function tierOf(value: string): number {
+  const i = MODEL_TIERS.findIndex(t => value.toLowerCase().includes(t))
+  return i === -1 ? MODEL_TIERS.length : i
+}
+
+async function loadModels($: any, now: number): Promise<void> {
+  if (now - modelsReadAt < 30000) return
+  modelsReadAt = now
+  try {
+    const r = await $.process.run(['sh', '-c', 'cat "$HOME/.claude/settings.json"'])
+    const picked = JSON.parse(String(r.stdout))?.modelPicker?.options
+    if (!Array.isArray(picked)) return
+    const list = picked
+      .filter((o: any) => typeof o?.model === 'string')
+      .map((o: any) => {
+        const tier = MODEL_TIERS.find(t => o.model.toLowerCase().includes(t))
+        const label = tier ? tier[0].toUpperCase() + tier.slice(1) : String(o.label ?? o.model)
+        return { value: o.model as string, label }
+      })
+      .sort((a: any, b: any) => tierOf(a.value) - tierOf(b.value))
+    if (list.length > 0) modelOptions = list
+  } catch {
+    // unreadable settings: keep the list we have
+  }
+}
+
 // ── Persistence ─────────────────────────────────────────────────────────────────────────────────
 // The session's history is tagged with its start time, so a different session never restores it.
 async function persist($: any): Promise<void> {
@@ -577,10 +611,12 @@ export const register: Register = on => {
     }
     // While the MCP tab shows, read the servers again every 5 seconds so a sign-in appears by itself.
     if (s.tab === 'mcp' && !s.isMcpBusy && now - s.mcpAt > 5000) void refreshMcp($)
+    await loadModels($, now)
     return paneView($.ui.resolve(e), {
       now,
       leftSec,
       currentModel: await $.session.model(),
+      models: modelOptions,
       bodyColumns: e.props.bodyColumns,
       act: {
         ping: () => void ping($, true),

@@ -12,13 +12,6 @@ const COL_GAP = 3
 // The handoff labels are padded to the widest wording, so the boxes keep one size while a label changes.
 const HAND_W = '⇄ handoff + pickup'.length
 
-// Weakest to strongest: the buttons keep this order and shade along the galaxy gradient.
-const MODELS = [
-  { value: 'claude-haiku-5-5', label: 'Haiku' },
-  { value: 'claude-sonnet-5-5', label: 'Sonnet' },
-  { value: 'claude-opus-5-5', label: 'Opus' },
-  { value: 'claude-fable-5-1', label: 'Fable' },
-]
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'].map(v => ({ value: v }))
 
 // What the buttons do, handed in by the hooks module: this file never touches the engine.
@@ -40,7 +33,17 @@ export type PaneActions = {
   authMcp: (server: string) => void
 }
 
-export type PaneData = { now: number; leftSec: number; currentModel: string; bodyColumns?: number; act: PaneActions }
+// One model button: the value is what /model receives, taken from settings.json (modelPicker), never typed here.
+export type ModelOption = { value: string; label: string }
+
+export type PaneData = {
+  now: number
+  leftSec: number
+  currentModel: string
+  models: ModelOption[]
+  bodyColumns?: number
+  act: PaneActions
+}
 
 export function paneView({ Box, Button, Text }: Ui, d: PaneData) {
   const tabs = (
@@ -64,10 +67,8 @@ export function paneView({ Box, Button, Text }: Ui, d: PaneData) {
       </Box>
     )
   }
-  const { now, leftSec, currentModel, act } = d
-  const modelValue = MODELS.find(
-    m => currentModel.includes(m.value) || currentModel.toLowerCase().includes(m.label.toLowerCase()),
-  )?.value
+  const { now, leftSec, currentModel, models, act } = d
+  const modelValue = models.find(m => m.value === currentModel || currentModel.includes(m.value))?.value
   // Layout follows the pane's width: one column when narrow, two side by side when wide.
   // Every bar and button row is sized from the column width, so nothing runs past the edge.
   const W = d.bodyColumns ?? 34
@@ -250,9 +251,9 @@ export function paneView({ Box, Button, Text }: Ui, d: PaneData) {
       {modelValue === undefined ? row('current', currentModel) : null}
       <Text dimColor>{'model   weaker ▸ stronger'}</Text>
       {seg(
-        MODELS.map((m, i) => ({
+        models.map((m, i) => ({
           id: `model-${m.value}`,
-          color: galaxyHex(i / (MODELS.length - 1)),
+          color: galaxyHex(i / Math.max(1, models.length - 1)),
           label: m.label,
           isCurrent: m.value === modelValue,
           onPress: () => act.setModel(m.value),

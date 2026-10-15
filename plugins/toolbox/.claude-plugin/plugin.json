@@ -1,6 +1,6 @@
 {
   "name": "toolbox",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Toolbox pane: cache keep-warm pings, context, time, cost, model and effort switchers, handoff, and a simple conversation view.",
   "author": {
     "name": "Zhengjie Ng"
