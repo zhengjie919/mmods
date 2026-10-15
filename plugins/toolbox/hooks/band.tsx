@@ -1,10 +1,10 @@
-// The band above the prompt: cache stats in one box, then the toolbox and view buttons.
+// The band above the prompt: cache stats in one box, then the view and toolbox buttons.
 import { clock, cellWidth, usd } from './format'
 import { gradient, type Ui } from './gradient'
 import { s } from './state'
 import { barCells, hitColor, leftColor } from './theme'
 
-export function bandView({ Box, Button, Text }: Ui, now: number, onToolbox: () => void, onView: () => void) {
+export function bandView({ Box, Button, Text }: Ui, now: number, onToolbox: () => void, onView: () => void, extra?: unknown) {
   const leftSec = Math.max(0, Math.ceil((s.warmUntil - now) / 1000))
   // Every box is drawn cell by cell so one plasma gradient runs left to right across the whole row.
   // Widths are counted with cellWidth, since ⚡ takes two cells.
@@ -23,7 +23,7 @@ export function bandView({ Box, Button, Text }: Ui, now: number, onToolbox: () =
   const statsInner = [cacheLabel, pctText, sep, timeText, sep, costText].reduce((n, t) => n + cellWidth(t), 2 + cells.length)
   const viewInner = viewLabel.length + 2
   const toolInner = toolLabel.length + 2
-  const widths = [statsInner + 2, toolInner + 2, viewInner + 2]
+  const widths = [statsInner + 2, viewInner + 2, toolInner + 2]
   const total = widths.reduce((a, w) => a + w, 0) + GAP * (widths.length - 1)
   const { frame, boxBtn } = gradient({ Box, Button, Text }, total)
   const gap = <Text key="gap">{' '.repeat(GAP)}</Text>
@@ -46,16 +46,18 @@ export function bandView({ Box, Button, Text }: Ui, now: number, onToolbox: () =
       <Text>{' '}</Text>
     </Box>
   ))
-  const toolX = widths[0] + GAP
-  const viewX = toolX + widths[1] + GAP
+  const viewX = widths[0] + GAP
+  const toolX = viewX + widths[1] + GAP
 
   return (
     <Box alignItems="center">
       {stats}
       {gap}
-      {boxBtn('toolbox', toolLabel, toolX, onToolbox)}
-      {gap}
       {boxBtn('view', viewLabel, viewX, onView)}
+      {gap}
+      {boxBtn('toolbox', toolLabel, toolX, onToolbox)}
+      {extra != null && gap}
+      {extra}
     </Box>
   )
 }

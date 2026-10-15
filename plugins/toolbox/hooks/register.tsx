@@ -596,7 +596,9 @@ export const register: Register = on => {
   // ── Band above the prompt ──
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    return bandView($.ui.resolve(e), await $.clock.now(), () => void toggleToolbox($), () => void toggleView($))
+    // Whatever the plugins beneath draw (another plugin's button) goes after the view button.
+    const extra = await next(e)
+    return bandView($.ui.resolve(e), await $.clock.now(), () => void toggleToolbox($), () => void toggleView($), extra)
   })
 
   // ── Toolbox pane ──
