@@ -254,6 +254,39 @@ async function guardColdSend($: any, e: any): Promise<{ drop: string } | undefin
   return { drop: `toolbox: ${text} Send it again to pay it, or /clear and start from a note.` }
 }
 
+// ── Update and reload plugins ───────────────────────────────────────────────────────────────────
+// Pulls every marketplace, updates each installed plugin (one at a time: they share one install record),
+// then reloads. A plugin read from a folder is a dev copy and has nothing to pull.
+async function updatePlugins($: any): Promise<void> {
+  if (s.isUpdating) return
+  s.isUpdating = true
+  s.updateNote = undefined
+  $.ui.invalidate('ui.render')
+  let updated = 0
+  let current = 0
+  const failed: string[] = []
+  try {
+    await $.process.run(['claude', 'plugin', 'marketplace', 'update'], { timeoutMs: 120_000 })
+    const listed = await $.process.run(['claude', 'plugin', 'list', '--json'])
+    const ids = (JSON.parse(listed.stdout) as { id: string; readFromFolder?: string }[])
+      .filter(p => p.readFromFolder === undefined)
+      .map(p => p.id)
+    for (const id of ids) {
+      const r = await $.process.run(['claude', 'plugin', 'update', id], { timeoutMs: 120_000 })
+      if (r.exitCode !== 0) failed.push(id.split('@')[0]!)
+      else if (/updated from/.test(r.stdout)) updated++
+      else current++
+    }
+  } catch (err) {
+    failed.push(String(err).slice(0, 60))
+  }
+  s.updateNote = `${updated} updated, ${current} current${failed.length ? `, failed: ${failed.join(' ')}` : ''}`
+  s.isUpdating = false
+  $.ui.invalidate('ui.render')
+  $.ui.toast(`plugins: ${s.updateNote}. Reloading.`)
+  void $.command.run({ command: 'reload-plugins' }).catch((err: unknown) => $.ui.toast(`plugins: reload failed: ${String(err)}`))
+}
+
 // ── Simple view ─────────────────────────────────────────────────────────────────────────────────
 async function toggleView($: any): Promise<void> {
   s.isSimple = !s.isSimple
@@ -649,6 +682,7 @@ export const register: Register = on => {
             s.isNewChatArmed = false
             void $.command.run({ command: 'clear' })
           }),
+        updatePlugins: () => void updatePlugins($),
         pickupFrom: path => void pickupFrom($, path),
         setTab: tab => {
           s.tab = tab

@@ -65,6 +65,10 @@ export const s = {
   isFlowing: false,
   // the new chat button was pressed once and waits for a second press (disarms by itself)
   isNewChatArmed: false,
+  // the plugins button is running: marketplaces and plugins update, then the session reloads them
+  isUpdating: false,
+  // what the last update found, shown under the button until the reload clears it
+  updateNote: undefined as string | undefined,
   // handoff files the pickup button found, while the chooser is open
   picks: undefined as { path: string; ageMs: number }[] | undefined,
   // the toolbox pane: closed, open but waiting undrawn (terminal too narrow), or drawn. Tracked here so

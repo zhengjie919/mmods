@@ -5,7 +5,7 @@ import { mcpView } from './mcp'
 import { idlePingCap, s, TTL_1H } from './state'
 import { barCells, ctxColor, galaxyHex, galaxyLightHex, hitColor, leftColor, MAGMA, partColor, segCells, WAVE_MS } from './theme'
 
-const SECTIONS = 7
+const SECTIONS = 8
 // Pane width in cells from which the toolbox splits into two columns, and the gap between them.
 const WIDE_AT = 64
 const COL_GAP = 3
@@ -26,6 +26,7 @@ export type PaneActions = {
   listHandoffs: () => void
   flow: () => void
   newChat: () => void
+  updatePlugins: () => void
   pickupFrom: (path: string) => void
   setTab: (tab: 'main' | 'mcp') => void
   refreshMcp: () => void
@@ -326,6 +327,23 @@ export function paneView({ Box, Button, Text }: Ui, d: PaneData) {
     </Box>
   )
 
+  // One button in the pane's own gradient. The label keeps one width, so the box does not jump while it works.
+  const PLUG_W = 'update + reload'.length
+  const pluginSection = (
+    <Box flexDirection="column">
+      {head('⟳ PLUGINS', 7)}
+      {gradGrid({ Box, Button, Text }, [
+        {
+          id: 'plugins',
+          label: (s.isUpdating ? 'updating…' : 'update + reload').padEnd(PLUG_W),
+          hotkey: 'r',
+          onPress: () => act.updatePlugins(),
+        },
+      ], colW, galaxyLightHex)}
+      {s.updateNote === undefined ? <Text dimColor>{'pull every marketplace, then reload'}</Text> : <Text color={s.updateNote.includes('failed') ? '#fb7185' : '#67e8f9'}>{s.updateNote}</Text>}
+    </Box>
+  )
+
   const spacer = <Text>{' '.repeat(COL_GAP)}</Text>
 
   if (!isWide) {
@@ -338,6 +356,8 @@ export function paneView({ Box, Button, Text }: Ui, d: PaneData) {
         {handoffSection}
         {gap}
         {sessionSection}
+        {gap}
+        {pluginSection}
         {gap}
         {cache}
         {gap}
@@ -361,6 +381,8 @@ export function paneView({ Box, Button, Text }: Ui, d: PaneData) {
         {handoffSection}
         {gap}
         {sessionSection}
+        {gap}
+        {pluginSection}
       </Box>
       {spacer}
       <Box width={colW} flexDirection="column">
