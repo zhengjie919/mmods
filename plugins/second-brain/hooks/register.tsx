@@ -144,7 +144,6 @@ async function finish($: EngineInterface): Promise<void> {
   await update($, queue, q => { next = q[0]; return q.slice(1) })
   // The run is handed straight to the next batch, so `running` is never null while one is owed.
   await update($, running, () => (next === undefined ? null : starting(next, now)))
-  $.ui.status(undefined)
   if (next !== undefined) await processBatch($, next)
 }
 
@@ -202,8 +201,6 @@ async function startCapture($: EngineInterface, batch: SecondBrainBatch): Promis
   captureAgents.add(agentId)
   const startedAt = await $.clock.now()
   await update($, running, r => (r === null ? r : { ...r, agentId, startedAt }))
-  // The engine already prefixes the plugin name.
-  $.ui.status('✎ Capturing into the wiki…')
   staleTimer?.cancel()
   staleTimer = $.clock.after(STALE_MS, () => void expire($, agentId).catch(err => $.ui.log(`second-brain: ${String(err)}`, { to: 'debug' })))
 
@@ -817,6 +814,10 @@ export const register: Register = (on, options) => {
     const total = inner + 2
     const paint = (str: string, x0: number, key: string) =>
       [...str].map((ch, i) => <Text key={`${key}${i}`} color={evergreen((x0 + i) / Math.max(1, total - 1))} bold>{ch}</Text>)
+    // Drawn in the band, not with $.ui.status: the engine paints a status in its warning colour and cannot gradient it.
+    const run = await read($, running)
+    const capturing = run !== null && run.agentId !== undefined
+    const note = '✎ Capturing into the wiki…'
     const toggle = async () => {
       const isUp = (await $.ui.panes()).some((p: { id: string }) => p.id === PANE)
       if (isUp) await $.ui.close({ id: PANE })
@@ -836,6 +837,11 @@ export const register: Register = (on, options) => {
           </Box>
           <Box>{paint(`╰${'─'.repeat(inner)}╯`, 0, 'u')}</Box>
         </Box>
+        {capturing && (
+          <Box marginLeft={2}>
+            {[...note].map((ch, i) => <Text key={`n${i}`} color={evergreen((i / Math.max(1, note.length - 1)) * 0.5)} bold>{ch}</Text>)}
+          </Box>
+        )}
       </Box>
     )
   })
