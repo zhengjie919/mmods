@@ -1,0 +1,16 @@
+{
+  "name": "mmods",
+  "owner": {
+    "name": "Zhengjie Ng"
+  },
+  "metadata": {
+    "description": "Personal Claude Code mods."
+  },
+  "plugins": [
+    {
+      "name": "toolbox",
+      "source": "./plugins/toolbox",
+      "description": "Toolbox pane: cache keep-warm pings, context, time, cost, model and effort switchers, handoff, and a simple conversation view."
+    }
+  ]
+}
