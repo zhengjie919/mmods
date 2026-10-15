@@ -239,3 +239,41 @@ export function recentNotePaths(status: string, log: string, max = 20): string[]
 
   return [...new Set(notes)].slice(0, max)
 }
+
+// First-run setup: what a folder offers, read from its markers, and how to describe it.
+export type VaultMarkers = { obsidian: boolean; agents: boolean; lock: boolean }
+
+export function vaultPathsFromObsidian(json: string): string[] {
+  try {
+    const vaults = (JSON.parse(json) as { vaults?: Record<string, { path?: unknown }> }).vaults ?? {}
+    return Object.values(vaults).map(v => (typeof v.path === 'string' ? v.path.replace(/\/+$/, '') : '')).filter(p => p !== '')
+  } catch {
+    return []
+  }
+}
+
+export function vaultScore(m: VaultMarkers): number {
+  return (m.lock ? 4 : 0) + (m.agents ? 2 : 0) + (m.obsidian ? 1 : 0)
+}
+
+export function vaultReason(m: VaultMarkers): string {
+  const found = [m.obsidian && 'Obsidian vault', m.agents && 'has AGENTS.md', m.lock && 'has scripts/write_lock.py'].filter(Boolean)
+  return found.length === 0 ? 'plain folder' : found.join(', ')
+}
+
+// What the capture agent cannot do in this folder. It writes only through the lock helper, and reads AGENTS.md first.
+export function vaultWarnings(m: VaultMarkers): string[] {
+  return [
+    m.lock ? '' : 'No scripts/write_lock.py: the capture agent cannot write here until the vault has it.',
+    m.agents ? '' : 'No AGENTS.md: the capture agent expects a policy there that allows captures.',
+  ].filter(w => w !== '')
+}
+
+export function expandHome(path: string, home: string): string {
+  const p = path.trim()
+  return (p === '~' ? home : p.startsWith('~/') ? `${home}/${p.slice(2)}` : p).replace(/\/+$/, '')
+}
+
+export function baseName(path: string): string {
+  return path.replace(/\/+$/, '').split('/').pop() ?? ''
+}

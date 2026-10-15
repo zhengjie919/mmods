@@ -1,7 +1,7 @@
 {
   "name": "second-brain",
   "version": "0.1.0",
-  "description": "Auto-captures durable knowledge from Claude sessions (and delegated opencode work) into the internship wiki with a background Haiku agent",
+  "description": "Auto-captures durable knowledge from Claude sessions (and delegated opencode work) into your knowledge wiki with a background Haiku agent",
   "author": {
     "name": "Zhengjie Ng"
   },
@@ -10,8 +10,8 @@
     "vaultPath": {
       "type": "string",
       "title": "Vault path",
-      "description": "Absolute path of the wiki vault",
-      "default": "/Users/zhengjie.ng/Documents/internship-technical-wiki"
+      "description": "Absolute path of the folder that holds your knowledge wiki, for example ~/Documents/my-wiki. Leave empty to choose it in the Second brain pane on first run.",
+      "default": ""
     },
     "model": {
       "type": "string",
@@ -29,13 +29,13 @@
       "type": "number",
       "title": "Idle minutes",
       "description": "Minutes with no new turn before a partial batch is checked",
-      "default": 3
+      "default": 10
     },
     "readRoots": {
       "type": "string",
       "title": "Read roots",
-      "description": "Comma-separated folders the capture agent may read besides the vault",
-      "default": "/Users/zhengjie.ng/gopath/src"
+      "description": "Optional. Comma-separated folders the capture agent may read for context besides the vault, for example your code folder. Leave empty to choose in the pane.",
+      "default": ""
     }
   }
 }

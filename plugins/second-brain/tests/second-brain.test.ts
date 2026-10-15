@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import {
   batchText, bashVerdict, clipMiddle, fallbackNotes, isAllowedBash, isAllowedWrite, isDurable,
   isHerdrDelegation, isLocked, mergeBatches, parseAcquire, parseResult, readVerdict, recentNotePaths,
-  redact, releaseArgs, typedTurns,
+  baseName, expandHome, redact, releaseArgs, typedTurns, vaultPathsFromObsidian, vaultReason, vaultScore, vaultWarnings,
 } from '../hooks/policy'
 
 const VAULT = '/v/wiki'
@@ -181,7 +181,7 @@ describe('batches, gate and results', () => {
   })
 })
 
-test('pane shows the status and its button pauses and resumes', async ($, on) => {
+test('pane shows the status and its button pauses and resumes', { options: { vaultPath: '/v/wiki' } }, async ($, on) => {
   mock.clock(on, { now: Date.UTC(2026, 9, 15, 4) })
   mock.store(on)
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -199,9 +199,46 @@ test('pane shows the status and its button pauses and resumes', async ($, on) =>
   }
 })
 
+test('pane asks for a vault while none is set', async ($, on) => {
+  mock.clock(on, { now: Date.UTC(2026, 9, 15, 4) })
+  mock.store(on)
+  const ui = await $.ui.mount({
+    plugin: 'second-brain', surface: 'terminal', component: 'Pane', requestId: 'second-brain',
+    props: { title: 'Second brain', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+  })
+  expect(await ui.find({ type: 'Text', text: 'Nothing is captured until you finish these two steps.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '⟳ Looking for your knowledge wiki…' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('lets main-loop tool calls through unchanged', async ($, on) => {
   on('tool.call', () => ({ result: 'ok' }))
   const ran = await $.tool.call({ tool: 'Bash', command: 'rm -rf /tmp/x' })
   expect(ran.deny).toBeUndefined()
   expect(ran.result).toBe('ok')
+})
+
+describe('first-run vault setup helpers', () => {
+  test('reads vault paths from obsidian.json', async () => {
+    const json = JSON.stringify({ vaults: { a: { path: '/h/wiki/' }, b: { path: '/h/notes' }, c: {} } })
+    expect(vaultPathsFromObsidian(json)).toEqual(['/h/wiki', '/h/notes'])
+    expect(vaultPathsFromObsidian('not json')).toEqual([])
+  })
+
+  test('ranks and describes a folder by its markers', async () => {
+    const full = { obsidian: true, agents: true, lock: true }
+    const plain = { obsidian: false, agents: false, lock: false }
+    expect(vaultScore(full)).toBeGreaterThan(vaultScore({ obsidian: true, agents: false, lock: false }))
+    expect(vaultReason(full)).toBe('Obsidian vault, has AGENTS.md, has scripts/write_lock.py')
+    expect(vaultReason(plain)).toBe('plain folder')
+    expect(vaultWarnings(full)).toEqual([])
+    expect(vaultWarnings(plain)).toHaveLength(2)
+  })
+
+  test('expands ~ and trims a trailing slash', async () => {
+    expect(expandHome('~/wiki/', '/h')).toBe('/h/wiki')
+    expect(expandHome('~', '/h')).toBe('/h')
+    expect(expandHome(' /a/b ', '/h')).toBe('/a/b')
+    expect(baseName('/a/my-wiki/')).toBe('my-wiki')
+  })
 })
