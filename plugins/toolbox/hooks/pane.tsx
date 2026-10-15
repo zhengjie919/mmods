@@ -340,7 +340,7 @@ export function paneView({ Box, Button, Text }: Ui, d: PaneData) {
           onPress: () => act.updatePlugins(),
         },
       ], colW, galaxyLightHex)}
-      {s.updateNote === undefined ? <Text dimColor>{'pull every marketplace, then reload'}</Text> : <Text color={s.updateNote.includes('failed') ? '#fb7185' : '#67e8f9'}>{s.updateNote}</Text>}
+      {s.updateNote === undefined ? null : <Text color={s.updateNote.includes('failed') ? '#fb7185' : '#67e8f9'}>{s.updateNote}</Text>}
     </Box>
   )
 
