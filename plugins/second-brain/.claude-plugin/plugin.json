@@ -1,0 +1,41 @@
+{
+  "name": "second-brain",
+  "version": "0.1.0",
+  "description": "Auto-captures durable knowledge from Claude sessions (and delegated opencode work) into the internship wiki with a background Haiku agent",
+  "author": {
+    "name": "Zhengjie Ng"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "vaultPath": {
+      "type": "string",
+      "title": "Vault path",
+      "description": "Absolute path of the wiki vault",
+      "default": "/Users/zhengjie.ng/Documents/internship-technical-wiki"
+    },
+    "model": {
+      "type": "string",
+      "title": "Model",
+      "description": "Model for the gate check and the capture agent",
+      "default": "haiku"
+    },
+    "batchTurns": {
+      "type": "number",
+      "title": "Turns per batch",
+      "description": "Finished turns with a typed prompt before the gate check runs",
+      "default": 6
+    },
+    "idleMinutes": {
+      "type": "number",
+      "title": "Idle minutes",
+      "description": "Minutes with no new turn before a partial batch is checked",
+      "default": 3
+    },
+    "readRoots": {
+      "type": "string",
+      "title": "Read roots",
+      "description": "Comma-separated folders the capture agent may read besides the vault",
+      "default": "/Users/zhengjie.ng/gopath/src"
+    }
+  }
+}

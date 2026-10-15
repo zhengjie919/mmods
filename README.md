@@ -19,6 +19,7 @@ claude plugin install <mod>@mmods
 | Mod | What it does |
 |---|---|
 | `toolbox` | Pane with cache keep-warm pings, context, time, cost, model and effort switchers, handoff, and a simple conversation view. Install: `claude plugin install toolbox@mmods` |
+| `second-brain` | Auto-captures durable knowledge from Claude sessions (and delegated opencode work) into an Obsidian wiki with a background Haiku agent. Pane with capture state and recent saves. Install: `claude plugin install second-brain@mmods` |
 
 ## Layout
 

@@ -11,6 +11,11 @@
       "name": "toolbox",
       "source": "./plugins/toolbox",
       "description": "Toolbox pane: cache keep-warm pings, context, time, cost, model and effort switchers, handoff, and a simple conversation view."
+    },
+    {
+      "name": "second-brain",
+      "source": "./plugins/second-brain",
+      "description": "Auto-captures durable knowledge from Claude sessions (and delegated opencode work) into the internship wiki with a background Haiku agent"
     }
   ]
 }
