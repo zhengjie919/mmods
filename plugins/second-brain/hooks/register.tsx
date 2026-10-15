@@ -23,6 +23,8 @@ const MAX_SAVES = 10
 let DATA_DIR = ''
 let CARRY_DIR = ''
 const MAX_GATE_ATTEMPTS = 3
+// A batch blocked by a write lock tries again this soon (at most the idle time): the lock holder is usually minutes from done.
+const BLOCKED_RETRY_MS = 5 * 60_000
 const MAX_ANSWER_CHARS = 12_000
 // One cap for the gate and the agent, so the gate decides on the text the agent gets.
 const MAX_BATCH_CHARS = 60_000
@@ -56,16 +58,16 @@ Rules:
 3. Save any reusable knowledge: code behavior, system facts, decisions, workflows, tool setup, gotchas. Never save transcripts, secrets, credentials or diary entries.
 4. Mark a claim verified only when you read its source yourself, in this run, with Read or a search. Claude's answers and opencode worker text are claims, not evidence, also when they say "I read X" or "verified". A claim you could not check is an inference or unverified, per the lifecycle rules.
 5. The batch lists notes that recent captures changed. Check them against the new turns and correct any that the new turns show are wrong, keeping conflicts visible per the lifecycle rules.
-6. Every write goes through the lock helper, with file scope. Bash runs in the vault root. Use this exact form (no $PWD, no ~, no shell operators):
+6. Every write goes through the lock helper, with file scope. Bash runs in the vault root. Use this exact form (no $PWD, no ~, no shell operators, no backslashes, and no braces or wildcards outside quotes):
    python3 scripts/write_lock.py --root ${vault} --wiki ${WIKI} --scope files status --path <paths...>
-   python3 scripts/write_lock.py --root ${vault} --wiki ${WIKI} --scope files acquire --path <paths...>
+   python3 scripts/write_lock.py --root ${vault} --wiki ${WIKI} --scope files acquire --path <paths...> --holder claude:second-brain-capture --reason capture-notes --ttl 15
    python3 scripts/write_lock.py --root ${vault} --wiki ${WIKI} --scope files release --path <paths...> --owner-id <id>
-   List every file you will write (notes, indexes, the daily log) in one acquire. Edit and Write are refused on a path you have not locked. To add a path, release, then acquire the full new set. On a conflict, wait with "sleep 10" and retry, up to 6 times. Always release your lock, also after a failure.
+   List every file you will write (notes, indexes, the daily log) in one acquire. Edit and Write are refused on a path you have not locked. To add a path, release, then acquire the full new set. Run status first. If any lock blocks your paths, a vault lock or a file lock, wait: another writer is probably finishing real work, and a vault lock can last minutes. Run "sleep 60", then status again, up to 10 times. status shows the holder, the reason and the lease: "lease=valid" means the holder still expects to finish; "lease=expired" or no lease is only a hint, so keep waiting just the same. Never take a vault lock yourself. If your paths are still blocked after 10 checks, release nothing and finish with status "blocked", naming the holder, reason and lease in "summary": the mod keeps your batch and tries again later, so no turns are lost. Always release your lock, also after a failure.
 7. Tools: Read only inside ${roots.join(', ')}, never credential files. Edit and Write only inside the vault, never AGENTS.md, CLAUDE.md, schema/, scripts/ or any dot file or dot folder. Bash only: rg, grep (no -r), ls, cat, head, tail, wc, find (no -exec, -delete, -f*), date, pwd, sleep, git status/diff/log/show/ls-files, and the lock helper. File arguments must be inside the read roots. You cannot delete, move or rename files. Do not commit: leave your changes uncommitted for the user to review.
 8. Update the relevant index and the daily log as the skills say.
 
-Your final message must end with exactly one line in this form (JSON on one line):
-SECOND_BRAIN {"status":"saved"|"nothing","summary":"<a short title, at most 12 words, naming what was captured, e.g. Group order voting session TTL; or why nothing>","notes":[{"path":"<vault-relative path without .md>","title":"<note title>"}]}`
+Your final message must be exactly one line and nothing else: no explanation, no list of checked files, no follow-up before or after it. Put any reason in "summary". Use this form (JSON on one line):
+SECOND_BRAIN {"status":"saved"|"nothing"|"blocked","summary":"<a short title, at most 12 words, naming what was captured, e.g. Group order voting session TTL; or why nothing or blocked>","notes":[{"path":"<vault-relative path without .md>","title":"<note title>"}]}`
 
 let idle: Timer | undefined
 let staleTimer: Timer | undefined
@@ -77,7 +79,7 @@ const cfg = {
   readRoots: [] as string[],
   model: 'haiku',
   batchTurns: 6,
-  idleMs: 10 * 60_000,
+  idleMs: 30 * 60_000,
   isWatching: true,
   cwd: '',
 }
@@ -126,7 +128,7 @@ async function releaseLocks($: EngineInterface, run: SecondBrainRunning) {
 }
 
 // Ends the current run (its leftover locks released) and starts the next queued batch, if any.
-async function mark($: EngineInterface, outcome: 'saved' | 'nothing' | 'skipped' | 'failed'): Promise<void> {
+async function mark($: EngineInterface, outcome: 'saved' | 'nothing' | 'skipped' | 'failed' | 'blocked'): Promise<void> {
   const at = await $.clock.now()
   await update($, lastRun, () => ({ at, outcome }))
 }
@@ -146,22 +148,41 @@ async function finish($: EngineInterface): Promise<void> {
   if (next !== undefined) await processBatch($, next)
 }
 
+// Puts a batch whose capture could not run back to wait for another try. A start failure counts toward
+// MAX_GATE_ATTEMPTS; a batch blocked by a write lock does not, so a long lock never drops it.
+async function requeue($: EngineInterface, batch: SecondBrainBatch, why: string, isBlocked = false): Promise<void> {
+  const attempts = (batch.attempts ?? 0) + (isBlocked ? 0 : 1)
+  if (attempts >= MAX_GATE_ATTEMPTS) {
+    $.ui.log(`second-brain: capture start failed ${attempts} times (${why}); batch dropped`, { to: 'debug' })
+    return
+  }
+  await update($, pending, p => (p === null ? { ...batch, attempts } : mergeBatches({ ...batch, attempts }, p)))
+  later($, isBlocked ? Math.min(cfg.idleMs, BLOCKED_RETRY_MS) : cfg.idleMs)
+}
+
+// Runs the gate and starts the capture agent. A throw puts the batch back instead of leaving the run slot held.
 async function processBatch($: EngineInterface, batch: SecondBrainBatch): Promise<void> {
+  let isCapturing = false
+  try {
+    isCapturing = await startCapture($, batch)
+  } catch (err) {
+    $.ui.log(`second-brain: capture start failed: ${String(err)}`, { to: 'debug' })
+    await requeue($, batch, String(err))
+  }
+  if (!isCapturing) await finish($)
+}
+
+// True when a capture agent now runs; false when the batch is settled and the run slot is free.
+async function startCapture($: EngineInterface, batch: SecondBrainBatch): Promise<boolean> {
   const text = clipEnd(batchText(batch), MAX_BATCH_CHARS)
   const gate = await $.model.complete({ model: cfg.model, system: GATE_RULES, prompt: text, effort: 'low', maxTokens: 256, timeoutMs: 30_000 })
   if (!gate.isAnswered) {
-    const attempts = (batch.attempts ?? 0) + 1
-    if (attempts < MAX_GATE_ATTEMPTS) {
-      await update($, pending, p => (p === null ? { ...batch, attempts } : mergeBatches({ ...batch, attempts }, p)))
-      later($, cfg.idleMs)
-    } else {
-      $.ui.log(`second-brain: gate check failed ${attempts} times (${gate.reason}); batch dropped`, { to: 'debug' })
-    }
-    return finish($)
+    await requeue($, batch, gate.reason)
+    return false
   }
   const durable = isDurable(gate.text)
   $.ui.log(`second-brain: gate ${durable ? 'passed' : 'skipped'} a batch of ${batch.turns.length} turns (${typedTurns(batch)} typed): ${JSON.stringify(gate.text.slice(0, 80))}`, { to: 'debug' })
-  if (!durable) { await mark($, 'skipped'); return finish($) }
+  if (!durable) { await mark($, 'skipped'); return false }
 
   const recent = await recentNotes($)
   const worker = batch.usedHerdr ? await opencodeText($, batch.startedAt) : ''
@@ -175,15 +196,18 @@ async function processBatch($: EngineInterface, batch: SecondBrainBatch): Promis
   const spawned = await $.agent.spawn({ subagentType: AGENT, prompt, description: 'second-brain capture', cwd: cfg.vault })
   if (spawned.deny !== undefined || spawned.agentId === undefined) {
     $.ui.toast(`second-brain: capture could not start: ${spawned.deny ?? 'no agent id'}`)
-    return finish($)
+    return false
   }
   const agentId = spawned.agentId
   captureAgents.add(agentId)
   const startedAt = await $.clock.now()
   await update($, running, r => (r === null ? r : { ...r, agentId, startedAt }))
-  $.ui.status('second-brain: capturing…')
+  // The engine already prefixes the plugin name.
+  $.ui.status('✎ Capturing into the wiki…')
   staleTimer?.cancel()
   staleTimer = $.clock.after(STALE_MS, () => void expire($, agentId).catch(err => $.ui.log(`second-brain: ${String(err)}`, { to: 'debug' })))
+
+  return true
 }
 
 async function expire($: EngineInterface, agentId: string) {
@@ -258,12 +282,17 @@ function evergreen(x: number): string {
   return `#${[0, 1, 2].map(c => hex2(a[c]! + (b[c]! - a[c]!) * t)).join('')}`
 }
 
-const OUTCOME = { saved: 'saved to the wiki', nothing: 'the agent found nothing to add', skipped: 'the gate found no durable knowledge', failed: 'the capture failed' }
+const OUTCOME = { saved: 'saved to the wiki', nothing: 'the agent found nothing to add', skipped: 'the gate found no durable knowledge', failed: 'the capture failed', blocked: 'a lock held the vault; the batch will be retried' }
 
 function later($: EngineInterface, ms: number) {
   idle?.cancel()
   void $.clock.now().then(n => update($, idleAt, () => (ms > 1000 ? n + ms : null)))
   idle = $.clock.after(ms, () => void flush($).catch(err => $.ui.log(`second-brain: ${String(err)}`, { to: 'debug' })))
+}
+
+// A turn that adds nothing to the batch still ends the pause `turn.start` made: wait out the idle time again if turns are pending.
+async function rearm($: EngineInterface) {
+  if ((await read($, pending)) !== null) later($, cfg.idleMs)
 }
 
 function sh($: EngineInterface, argv: string[]) {
@@ -346,6 +375,12 @@ async function complete($: EngineInterface, run: SecondBrainRunning, answer: str
   if (result.status === 'failed') {
     $.ui.toast(`second-brain: capture failed: ${result.summary}${written.length === 0 ? '' : ` It changed: ${written.join(', ')}.`}`)
     await mark($, 'failed')
+    return finish($)
+  }
+  if (result.status === 'blocked') {
+    $.ui.toast(`second-brain: a write lock held the vault, so the capture will run again later. ${result.summary}`)
+    await mark($, 'blocked')
+    await requeue($, run.batch, result.summary, true)
     return finish($)
   }
   if (result.status === 'nothing') { await mark($, 'nothing'); return finish($) }
@@ -589,7 +624,7 @@ export const register: Register = (on, options) => {
   cfg.readRoots = String(options.readRoots ?? '').split(',').map(r => r.trim()).filter(Boolean)
   cfg.model = String(options.model ?? 'haiku')
   cfg.batchTurns = Math.max(1, Number(options.batchTurns ?? 6))
-  cfg.idleMs = Math.max(1, Number(options.idleMinutes ?? 10)) * 60_000
+  cfg.idleMs = Math.max(1, Number(options.idleMinutes ?? 30)) * 60_000
 
   on('session.start', async ($, e, next) => {
     // Redraw the idle countdown; nothing changes while no timer runs.
@@ -702,6 +737,11 @@ export const register: Register = (on, options) => {
 
   on('turn.start', async ($, e, next) => {
     if (cfg.isWatching) {
+      // The agent is answering, so the session is not idle: the countdown starts again when this turn completes.
+      if (e.agentId === undefined) {
+        idle?.cancel()
+        await update($, idleAt, () => null)
+      }
       await update($, current, () => ({ prompt: redact(clip(e.text, 2000)), tools: [], usedHerdr: false }))
       await loadCarry($)
     }
@@ -721,7 +761,8 @@ export const register: Register = (on, options) => {
       }
       return next(e)
     }
-    if (!cfg.isWatching || e.isAborted) return next(e)
+    if (!cfg.isWatching) return next(e)
+    if (e.isAborted) { await rearm($); return next(e) }
 
     const now = await $.clock.now()
     let turn: SecondBrainTurn = { at: now, prompt: '', tools: [], answer: redact(clipMiddle(e.answer, MAX_ANSWER_CHARS)) }
@@ -732,7 +773,7 @@ export const register: Register = (on, options) => {
     })
     // Work on this mod is not knowledge to capture.
     const isSelf = turn.tools.some(l => l.includes($.plugin.root))
-    if (isSelf || (await read($, paused))) return next(e)
+    if (isSelf || (await read($, paused))) { await rearm($); return next(e) }
 
     let size = 0
     await update($, pending, p => {
@@ -765,6 +806,38 @@ export const register: Register = (on, options) => {
     if (all.length > 0) await saveCarry($, e.sessionId, all.reduce(mergeBatches))
 
     return next(e)
+  })
+
+  // A button the toolbox band draws after its own two (it hands this hook the draw): opens the pane, or closes it when it is up.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const label = '✎ second brain'
+    const inner = label.length + 2
+    const total = inner + 2
+    const paint = (str: string, x0: number, key: string) =>
+      [...str].map((ch, i) => <Text key={`${key}${i}`} color={evergreen((x0 + i) / Math.max(1, total - 1))} bold>{ch}</Text>)
+    const toggle = async () => {
+      const isUp = (await $.ui.panes()).some((p: { id: string }) => p.id === PANE)
+      if (isUp) await $.ui.close({ id: PANE })
+      else await $.ui.open({ id: PANE, title: 'Second brain' })
+    }
+
+    return (
+      <Box alignItems="center">
+        <Box flexDirection="column">
+          <Box>{paint(`╭${'─'.repeat(inner)}╮`, 0, 't')}</Box>
+          <Box>
+            {paint('│', 0, 'l')}
+            <Button key="open-pane" label={label} plain onPress={() => void toggle().catch(() => undefined)}>
+              {paint(` ${label} `, 1, 'b')}
+            </Button>
+            {paint('│', total - 1, 'r')}
+          </Box>
+          <Box>{paint(`╰${'─'.repeat(inner)}╯`, 0, 'u')}</Box>
+        </Box>
+      </Box>
+    )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

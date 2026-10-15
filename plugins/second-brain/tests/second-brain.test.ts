@@ -16,6 +16,7 @@ describe('capture agent Bash policy', () => {
     expect(isAllowedBash('git diff HEAD~1 -- wiki/a.md', VAULT)).toBe(true)
     expect(isAllowedBash('find wiki -name "*.md"', VAULT)).toBe(true)
     expect(isAllowedBash('sleep 10', VAULT)).toBe(true)
+    expect(isAllowedBash('sleep 60', VAULT)).toBe(true)
     expect(isAllowedBash(`${LOCK} status --path a.md`, VAULT)).toBe(true)
   })
 
@@ -29,6 +30,7 @@ describe('capture agent Bash policy', () => {
     expect(isAllowedBash('python3 -c "import os"', VAULT)).toBe(false)
     expect(isAllowedBash('cat $(echo a)', VAULT)).toBe(false)
     expect(isAllowedBash('cat ~/.ssh/id_rsa', VAULT)).toBe(false)
+    expect(isAllowedBash('sleep 61', VAULT)).toBe(false)
     expect(isAllowedBash('sleep 999', VAULT)).toBe(false)
   })
 
@@ -52,6 +54,12 @@ describe('capture agent Bash policy', () => {
     expect(isAllowedBash('find -L .', VAULT)).toBe(false)
   })
 
+  test('allows the lease arguments on acquire and still reads the paths', async () => {
+    const acquire = `${LOCK} acquire --path wiki/a.md log/x.md --holder claude:second-brain-capture --reason capture-notes --ttl 15`
+    expect(isAllowedBash(acquire, VAULT)).toBe(true)
+    expect(parseAcquire(acquire, 'Acquired 2 w file lock(s). Owner ID: abc-123')).toEqual({ scope: 'files', paths: ['wiki/a.md', 'log/x.md'], ownerId: 'abc-123' })
+  })
+
   test('holds the lock helper to this vault', async () => {
     expect(isAllowedBash('python3 scripts/write_lock.py --root /tmp/x --wiki w --scope files status', VAULT)).toBe(false)
     expect(isAllowedBash(`${LOCK} status --root /tmp/x`, VAULT)).toBe(false)
@@ -61,6 +69,21 @@ describe('capture agent Bash policy', () => {
   test('returns the file arguments to resolve', async () => {
     expect(bashVerdict('cat /etc/passwd wiki/a.md', VAULT).paths).toEqual(['/etc/passwd', 'wiki/a.md'])
     expect(bashVerdict('rg --glob=/x/y z', VAULT).paths).toEqual(['/x/y', 'z'])
+  })
+
+  test('returns the paths as the shell will open them, quotes removed', async () => {
+    expect(bashVerdict('cat /v/"wiki/.."/../x', VAULT).paths).toEqual(['/v/wiki/../../x'])
+    expect(bashVerdict("cat '/v/wiki'/a.md", VAULT).paths).toEqual(['/v/wiki/a.md'])
+    expect(bashVerdict('rg -n "group order" wiki', VAULT).paths).toEqual(['group order', 'wiki'])
+  })
+
+  test('refuses what the guard cannot read the way the shell does', async () => {
+    expect(isAllowedBash('cat /v/{wiki,..}/x', VAULT)).toBe(false)
+    expect(isAllowedBash('cat /v/wiki/*', VAULT)).toBe(false)
+    expect(isAllowedBash('ls wiki/a?.md', VAULT)).toBe(false)
+    expect(isAllowedBash('cat wiki/a\\ b', VAULT)).toBe(false)
+    expect(isAllowedBash('cat "wiki/a', VAULT)).toBe(false)
+    expect(isAllowedBash('find wiki -name "*.md"', VAULT)).toBe(true)
   })
 })
 
@@ -147,6 +170,7 @@ describe('batches, gate and results', () => {
     const r = parseResult('done\nSECOND_BRAIN {"status":"saved","summary":"Added X","notes":[{"path":"wiki/a","title":"A"}]}')
     expect(r.status).toBe('saved')
     expect(r.notes).toEqual([{ path: 'wiki/a', title: 'A' }])
+    expect(parseResult('SECOND_BRAIN {"status":"blocked","summary":"vault lock held by x","notes":[]}')).toEqual({ status: 'blocked', summary: 'vault lock held by x', notes: [] })
     expect(parseResult('no line').status).toBe('failed')
     expect(parseResult('SECOND_BRAIN {bad').status).toBe('failed')
   })

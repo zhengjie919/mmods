@@ -49,7 +49,7 @@ declare module 'claude-code' {
       setup: SecondBrainSetup | null
       idleAt: number | null
       tick: number
-      lastRun: { at: number; outcome: 'saved' | 'nothing' | 'skipped' | 'failed' } | null
+      lastRun: { at: number; outcome: 'saved' | 'nothing' | 'skipped' | 'failed' | 'blocked' } | null
     }
   }
 }

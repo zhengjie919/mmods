@@ -1,6 +1,6 @@
 {
   "name": "second-brain",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Auto-captures durable knowledge from Claude sessions (and delegated opencode work) into your knowledge wiki with a background Haiku agent",
   "author": {
     "name": "Zhengjie Ng"
@@ -29,7 +29,7 @@
       "type": "number",
       "title": "Idle minutes",
       "description": "Minutes with no new turn before a partial batch is checked",
-      "default": 10
+      "default": 30
     },
     "readRoots": {
       "type": "string",

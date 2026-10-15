@@ -25,6 +25,38 @@ export function words(command: string): string[] {
   return command.trim().split(/\s+/).map(w => w.replace(/^['"]|['"]$/g, ''))
 }
 
+// Splits like the shell does: quotes group words and vanish, so the guard sees the paths the command opens.
+// Undefined when the shell would do more than this: a backslash, a brace or wildcard outside quotes, an open quote.
+function shellWords(command: string): string[] | undefined {
+  if (command.includes('\\')) return undefined
+  const out: string[] = []
+  let word = ''
+  let isWord = false
+  let quote = ''
+  for (const ch of command) {
+    if (quote !== '') {
+      if (ch === quote) quote = ''
+      else word += ch
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+      isWord = true
+    } else if (/\s/.test(ch)) {
+      if (isWord) out.push(word)
+      word = ''
+      isWord = false
+    } else if (/[{}*?[\]]/.test(ch)) {
+      return undefined
+    } else {
+      word += ch
+      isWord = true
+    }
+  }
+  if (quote !== '') return undefined
+  if (isWord) out.push(word)
+
+  return out
+}
+
 export function isWriteLockCommand(command: string): boolean {
   const [program, script] = words(command)
 
@@ -35,7 +67,9 @@ export function isWriteLockCommand(command: string): boolean {
 // name files, to be resolved and held to the read roots by the caller.
 export function bashVerdict(command: string, vault: string): { reason?: string; paths: string[] } {
   if (SHELL_META.test(command)) return { reason: 'shell operators, $ and ~ are not allowed', paths: [] }
-  const [program, ...args] = words(command)
+  const tokens = shellWords(command)
+  if (tokens === undefined) return { reason: 'backslashes, open quotes, and braces or wildcards outside quotes are not allowed', paths: [] }
+  const [program, ...args] = tokens
   if (program === undefined) return { reason: 'empty command', paths: [] }
 
   if (program === 'python3' || program === 'python') {
@@ -46,7 +80,7 @@ export function bashVerdict(command: string, vault: string): { reason?: string; 
     return { paths: [] }
   }
   if (program === 'sleep') {
-    return args.length === 1 && /^\d+$/.test(args[0]!) && Number(args[0]) <= 15 ? { paths: [] } : { reason: 'sleep takes one whole number of seconds, at most 15', paths: [] }
+    return args.length === 1 && /^\d+$/.test(args[0]!) && Number(args[0]) <= 60 ? { paths: [] } : { reason: 'sleep takes one whole number of seconds, at most 60', paths: [] }
   }
   if (program === 'git') {
     if (args[0] === undefined || !GIT_READ_ONLY.has(args[0])) return { reason: 'git allows only status, diff, log, show and ls-files', paths: [] }
@@ -199,14 +233,14 @@ export function mergeBatches(a: SecondBrainBatch, b: SecondBrainBatch): SecondBr
   }
 }
 
-export type CaptureResult = { status: 'saved' | 'nothing' | 'failed'; summary: string; notes: SecondBrainNote[] }
+export type CaptureResult = { status: 'saved' | 'nothing' | 'blocked' | 'failed'; summary: string; notes: SecondBrainNote[] }
 
 export function parseResult(answer: string): CaptureResult {
   const line = answer.split('\n').reverse().find(l => l.trim().startsWith('SECOND_BRAIN '))
   if (line === undefined) return { status: 'failed', summary: 'The capture agent gave no SECOND_BRAIN result line.', notes: [] }
   try {
     const raw = JSON.parse(line.trim().slice('SECOND_BRAIN '.length)) as Partial<CaptureResult>
-    const status = raw.status === 'saved' || raw.status === 'nothing' ? raw.status : 'failed'
+    const status = raw.status === 'saved' || raw.status === 'nothing' || raw.status === 'blocked' ? raw.status : 'failed'
     const notes = Array.isArray(raw.notes)
       ? raw.notes.filter(n => typeof n?.path === 'string').map(n => ({ path: n.path, title: String(n.title ?? n.path) }))
       : []
