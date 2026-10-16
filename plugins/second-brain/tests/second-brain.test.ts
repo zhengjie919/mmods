@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import {
   batchText, bashVerdict, clipMiddle, fallbackNotes, isAllowedBash, isAllowedWrite, isDurable,
   isHerdrDelegation, isLocked, mergeBatches, parseAcquire, parseResult, readVerdict, recentNotePaths,
-  baseName, expandHome, redact, releaseArgs, typedTurns, vaultPathsFromObsidian, vaultReason, vaultScore, vaultWarnings,
+  baseName, expandHome, isCaptureHandback, redact, releaseArgs, typedTurns, vaultPathsFromObsidian, vaultReason, vaultScore, vaultWarnings,
 } from '../hooks/policy'
 
 const VAULT = '/v/wiki'
@@ -137,6 +137,15 @@ describe('read and write paths', () => {
 
 describe('batches, gate and results', () => {
   const turn = { at: 1, prompt: 'p', tools: [], answer: 'a' }
+
+  test('recognises a capture hand-back by its result line', async () => {
+    const line = 'SECOND_BRAIN {"status":"saved","summary":"x","notes":[]}'
+    expect(isCaptureHandback(line)).toBe(true)
+    expect(isCaptureHandback(`[Subagent hand-back] second-brain capture\n  ${line}`)).toBe(true)
+    expect(isCaptureHandback('Ordinary text about the group order.')).toBe(false)
+    expect(isCaptureHandback(`The capture agent wrote SECOND_BRAIN {"status":"saved"} earlier.`)).toBe(false)
+    expect(isCaptureHandback('SECOND_BRAIN {not json')).toBe(false)
+  })
 
   test('detects Herdr delegation', async () => {
     expect(isHerdrDelegation('herdr agent send opencode "fix it"')).toBe(true)

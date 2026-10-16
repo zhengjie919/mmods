@@ -235,6 +235,15 @@ export function mergeBatches(a: SecondBrainBatch, b: SecondBrainBatch): SecondBr
 
 export type CaptureResult = { status: 'saved' | 'nothing' | 'blocked' | 'failed'; summary: string; notes: SecondBrainNote[] }
 
+// The JSON after `SECOND_BRAIN ` on a result line; undefined when it is not valid JSON.
+function readResultLine(line: string): Partial<CaptureResult> | undefined {
+  try {
+    return (JSON.parse(line.trim().slice('SECOND_BRAIN '.length)) as Partial<CaptureResult> | null) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function parseResult(answer: string): CaptureResult {
   const line = answer.split('\n').reverse().find(l => l.trim().startsWith('SECOND_BRAIN '))
   if (line === undefined) return { status: 'failed', summary: 'The capture agent gave no SECOND_BRAIN result line.', notes: [] }
@@ -249,6 +258,15 @@ export function parseResult(answer: string): CaptureResult {
   } catch {
     return { status: 'failed', summary: 'The capture agent result line is not valid JSON.', notes: [] }
   }
+}
+
+// True when a delivery's text carries a capture agent's result line (`SECOND_BRAIN {...}`) that parses as JSON.
+// The line may sit indented inside a harness frame. A sentence that only mentions SECOND_BRAIN does not count.
+export function isCaptureHandback(text: string): boolean {
+  return text.split('\n').some(l => {
+    const line = l.trim()
+    return line.startsWith('SECOND_BRAIN {') && readResultLine(line) !== undefined
+  })
 }
 
 // Notes worth a toast when the agent named none: not the daily log, not an index.

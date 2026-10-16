@@ -1,6 +1,6 @@
 {
   "name": "second-brain",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Auto-captures durable knowledge from Claude sessions (and delegated opencode work) into your knowledge wiki with a background Haiku agent",
   "author": {
     "name": "Zhengjie Ng"

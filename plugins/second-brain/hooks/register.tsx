@@ -6,7 +6,7 @@ import type {
 } from '../types'
 import {
   MAX_TURNS, batchText, bashVerdict, clip, clipEnd, clipMiddle, fallbackNotes, isAllowedWrite, isDurable, isHerdrDelegation,
-  isLocked, isWriteLockCommand, mergeBatches, parseAcquire, parseResult, readVerdict, recentNotePaths, redact,
+  isCaptureHandback, isLocked, isWriteLockCommand, mergeBatches, parseAcquire, parseResult, readVerdict, recentNotePaths, redact,
   baseName, expandHome, releaseArgs, toolLine, typedTurns, vaultPathsFromObsidian, vaultReason, vaultRelative, vaultScore, vaultWarnings, words,
 } from './policy'
 import type { VaultMarkers } from './policy'
@@ -72,6 +72,9 @@ SECOND_BRAIN {"status":"saved"|"nothing"|"blocked","summary":"<a short title, at
 let idle: Timer | undefined
 let staleTimer: Timer | undefined
 const captureAgents = new Set<string>()
+// When a capture agent's turn last ended. A hand-back arriving soon after is taken to be its final answer.
+let lastCaptureEndAt: number | undefined
+const HANDBACK_WINDOW_MS = 5 * 60_000
 
 const cfg = {
   vault: '',
@@ -750,9 +753,11 @@ export const register: Register = (on, options) => {
     if (e.agentId !== undefined) {
       const run = await read($, running)
       if (run !== null && run.agentId === e.agentId) {
+        lastCaptureEndAt = await $.clock.now()
         void complete($, run, e.answer, e.reason !== 'answer')
           .catch(err => { $.ui.toast(`second-brain: capture failed: ${String(err)}`); return finish($) })
       } else if (await isCapture($, e.agentId)) {
+        lastCaptureEndAt = await $.clock.now()
         $.ui.log(`second-brain: capture agent ${e.agentId} ended but the running slot is ${run === null ? 'empty' : `held by ${run.agentId}`}`, { to: 'debug' })
         $.ui.toast('second-brain: a capture agent ended but the mod had no matching run, so it was not saved to SAVES.')
       }
@@ -783,6 +788,18 @@ export const register: Register = (on, options) => {
 
     return next(e)
   })
+
+  // A capture agent's final answer is also delivered to the main conversation; the mod already reads it in turn.complete, so drop it here.
+  on('session.receive', async ($, e, next) => {
+    if (e.agentId !== undefined || !isCaptureHandback(e.text)) return next(e)
+    const isRunning = (await read($, running))?.agentId !== undefined
+    const now = await $.clock.now()
+    const isRecent = lastCaptureEndAt !== undefined && now - lastCaptureEndAt < HANDBACK_WINDOW_MS
+    if (!isRunning && !isRecent) return next(e)
+    $.ui.log(`second-brain: consumed a capture hand-back (origin ${JSON.stringify(e.origin)})`, { to: 'debug' })
+
+    return { consumed: 'second-brain capture hand-back' }
+  }).catch(($, e, next) => next(e))
 
   on('session.compact', async ($, e, next) => {
     if (e.agentId === undefined && e.trigger !== 'precompute') later($, 1)
